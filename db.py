@@ -186,29 +186,22 @@ class Database:
 
     async def ensure_user(self, user_id: int, username: str | None, full_name: str) -> None:
         async with self.connect() as conn:
-            row = await (
-                await conn.execute(
-                    "SELECT user_id FROM users WHERE user_id = ?", (user_id,)
-                )
-            ).fetchone()
             now = now_iso()
-            if row is None:
-                await conn.execute(
-                    """
-                    INSERT INTO users(user_id, username, full_name, created_at, last_seen_at, last_reset_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (user_id, username, full_name, now, now, now),
-                )
-                await conn.execute(
-                    "INSERT OR IGNORE INTO points(user_id, points, level) VALUES (?, 0, 'Новичок')",
-                    (user_id,),
-                )
-            else:
-                await conn.execute(
-                    "UPDATE users SET username = ?, full_name = ?, last_seen_at = ? WHERE user_id = ?",
-                    (username, full_name, now, user_id),
-                )
+            await conn.execute(
+                """
+                INSERT INTO users(user_id, username, full_name, created_at, last_seen_at, last_reset_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    username = excluded.username,
+                    full_name = excluded.full_name,
+                    last_seen_at = excluded.last_seen_at
+                """,
+                (user_id, username, full_name, now, now, now),
+            )
+            await conn.execute(
+                "INSERT OR IGNORE INTO points(user_id, points, level) VALUES (?, 0, 'Новичок')",
+                (user_id,),
+            )
             await conn.commit()
 
     async def touch_last_seen(self, user_id: int) -> None:
