@@ -33,7 +33,9 @@ python main.py
    - `BOT_TOKEN` - токен бота;
    - `DB_PATH=bot.db`;
    - `COURSES_FILE=courses.txt`;
-   - `REMINDER_CHECK_SECONDS=3600` (по желанию).
+   - `REMINDER_CHECK_SECONDS=3600` (по желанию);
+   - `ADMIN_USERNAMES=@doubglegwap,@doublegwap` (для команд `/stats` и `/stats_full`);
+   - `ADMIN_USER_IDS=123456789` (рекомендуется, самый надежный вариант).
 3. Убедитесь, что в корне проекта есть файл `courses.txt` с курсами.
 4. Укажите команду установки:
 

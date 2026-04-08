@@ -29,7 +29,6 @@ from states import SearchStates
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-ADMIN_USERNAME = "doubglegwap"
 
 
 INTEREST_TO_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -67,10 +66,18 @@ async def show_main_menu(target: Message | CallbackQuery, text: str = "") -> Non
         await target.message.edit_text(text, reply_markup=main_menu_kb())
 
 
-def is_admin(user: User | None) -> bool:
-    if not user or not user.username:
+def is_admin(
+    user: User | None,
+    admin_usernames: tuple[str, ...],
+    admin_user_ids: tuple[int, ...],
+) -> bool:
+    if not user:
         return False
-    return user.username.casefold() == ADMIN_USERNAME.casefold()
+    if user.id in admin_user_ids:
+        return True
+    if not user.username:
+        return False
+    return user.username.casefold() in admin_usernames
 
 
 async def main() -> None:
@@ -133,7 +140,7 @@ async def main() -> None:
 
     @dp.message(Command("stats"))
     async def cmd_stats(message: Message) -> None:
-        if not is_admin(message.from_user):
+        if not is_admin(message.from_user, config.admin_usernames, config.admin_user_ids):
             await message.answer("⛔ Команда доступна только администратору.")
             return
         users_count, messages_count = await db.get_admin_stats()
@@ -145,7 +152,7 @@ async def main() -> None:
 
     @dp.message(Command("stats_full"))
     async def cmd_stats_full(message: Message) -> None:
-        if not is_admin(message.from_user):
+        if not is_admin(message.from_user, config.admin_usernames, config.admin_user_ids):
             await message.answer("⛔ Команда доступна только администратору.")
             return
         stats = await db.get_admin_stats_full()
@@ -160,6 +167,13 @@ async def main() -> None:
             f"Скачиваний за 7д: {stats['downloads_7d']}\n\n"
             f"Рефералов всего: {stats['referrals_total']}\n"
             f"Избранных всего: {stats['favorites_total']}"
+        )
+
+    @dp.message(Command("myid"))
+    async def cmd_myid(message: Message) -> None:
+        username_line = f"Username: @{message.from_user.username}" if message.from_user.username else "Username: (none)"
+        await message.answer(
+            f"Your Telegram ID: {message.from_user.id}\n{username_line}"
         )
 
     @dp.message(Command("ref"))
