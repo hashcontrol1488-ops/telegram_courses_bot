@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from typing import Any, Awaitable, Callable, Dict
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, User
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
 
 from catalog import Catalog, Course, parse_courses_file
 from config import get_config
@@ -27,6 +29,7 @@ from states import SearchStates
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+ADMIN_USERNAME = "doubglegwap"
 
 
 INTEREST_TO_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -64,6 +67,12 @@ async def show_main_menu(target: Message | CallbackQuery, text: str = "") -> Non
         await target.message.edit_text(text, reply_markup=main_menu_kb())
 
 
+def is_admin(user: User | None) -> bool:
+    if not user or not user.username:
+        return False
+    return user.username.casefold() == ADMIN_USERNAME.casefold()
+
+
 async def main() -> None:
     config = get_config()
     catalog_data = parse_courses_file(config.courses_file)
@@ -73,6 +82,21 @@ async def main() -> None:
 
     bot = Bot(token=config.bot_token)
     dp = Dispatcher()
+
+    class MessageStatsMiddleware(BaseMiddleware):
+        def __init__(self, database: Database) -> None:
+            self.database = database
+
+        async def __call__(
+            self,
+            handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
+            event: Message,
+            data: Dict[str, Any],
+        ) -> Any:
+            await self.database.increment_message_counter()
+            return await handler(event, data)
+
+    dp.message.middleware(MessageStatsMiddleware(db))
 
     async def ensure_and_reward(msg: Message) -> tuple[int, str, bool]:
         await db.ensure_user(msg.from_user.id, msg.from_user.username, msg.from_user.full_name)
@@ -106,6 +130,37 @@ async def main() -> None:
             f"🎁 Курс дня:\n\n{course.title}\n\nЭтот курс не учитывается в дневном лимите."
         )
         await message.answer(course.url)
+
+    @dp.message(Command("stats"))
+    async def cmd_stats(message: Message) -> None:
+        if not is_admin(message.from_user):
+            await message.answer("⛔ Команда доступна только администратору.")
+            return
+        users_count, messages_count = await db.get_admin_stats()
+        await message.answer(
+            "📊 Статистика бота\n\n"
+            f"Пользователей: {users_count}\n"
+            f"Сообщений: {messages_count}"
+        )
+
+    @dp.message(Command("stats_full"))
+    async def cmd_stats_full(message: Message) -> None:
+        if not is_admin(message.from_user):
+            await message.answer("⛔ Команда доступна только администратору.")
+            return
+        stats = await db.get_admin_stats_full()
+        await message.answer(
+            "📈 Расширенная статистика\n\n"
+            f"Пользователи всего: {stats['users_total']}\n"
+            f"Новых за 24ч: {stats['users_new_24h']}\n"
+            f"Активных за 24ч: {stats['users_active_24h']}\n\n"
+            f"Сообщений всего: {stats['messages_total']}\n\n"
+            f"Скачиваний всего: {stats['downloads_total']}\n"
+            f"Скачиваний за 24ч: {stats['downloads_24h']}\n"
+            f"Скачиваний за 7д: {stats['downloads_7d']}\n\n"
+            f"Рефералов всего: {stats['referrals_total']}\n"
+            f"Избранных всего: {stats['favorites_total']}"
+        )
 
     @dp.message(Command("ref"))
     async def cmd_ref(message: Message) -> None:

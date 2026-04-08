@@ -86,6 +86,11 @@ class Database:
                     last_daily_visit TEXT,
                     FOREIGN KEY(user_id) REFERENCES users(user_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS bot_stats (
+                    key TEXT PRIMARY KEY,
+                    value INTEGER NOT NULL DEFAULT 0
+                );
                 """
             )
             try:
@@ -94,7 +99,90 @@ class Database:
                 )
             except aiosqlite.OperationalError:
                 pass
+            await conn.execute(
+                """
+                INSERT OR IGNORE INTO bot_stats(key, value)
+                VALUES ('total_messages', 0)
+                """
+            )
             await conn.commit()
+
+    async def increment_message_counter(self) -> None:
+        async with self.connect() as conn:
+            await conn.execute(
+                """
+                UPDATE bot_stats
+                SET value = value + 1
+                WHERE key = 'total_messages'
+                """
+            )
+            await conn.commit()
+
+    async def get_admin_stats(self) -> tuple[int, int]:
+        async with self.connect() as conn:
+            users_row = await (await conn.execute("SELECT COUNT(*) AS c FROM users")).fetchone()
+            messages_row = await (
+                await conn.execute(
+                    """
+                    SELECT value FROM bot_stats
+                    WHERE key = 'total_messages'
+                    """
+                )
+            ).fetchone()
+            users_count = int(users_row["c"]) if users_row else 0
+            messages_count = int(messages_row["value"]) if messages_row else 0
+            return users_count, messages_count
+
+    async def get_admin_stats_full(self) -> dict[str, int]:
+        now = datetime.utcnow()
+        since_24h = (now - timedelta(hours=24)).isoformat(timespec="seconds")
+        since_7d = (now - timedelta(days=7)).isoformat(timespec="seconds")
+        async with self.connect() as conn:
+            users_total_row = await (await conn.execute("SELECT COUNT(*) AS c FROM users")).fetchone()
+            users_new_24h_row = await (
+                await conn.execute(
+                    "SELECT COUNT(*) AS c FROM users WHERE created_at >= ?",
+                    (since_24h,),
+                )
+            ).fetchone()
+            users_active_24h_row = await (
+                await conn.execute(
+                    "SELECT COUNT(*) AS c FROM users WHERE last_seen_at >= ?",
+                    (since_24h,),
+                )
+            ).fetchone()
+            messages_total_row = await (
+                await conn.execute(
+                    "SELECT value FROM bot_stats WHERE key = 'total_messages'"
+                )
+            ).fetchone()
+            downloads_total_row = await (await conn.execute("SELECT COUNT(*) AS c FROM downloads")).fetchone()
+            downloads_24h_row = await (
+                await conn.execute(
+                    "SELECT COUNT(*) AS c FROM downloads WHERE downloaded_at >= ?",
+                    (since_24h,),
+                )
+            ).fetchone()
+            downloads_7d_row = await (
+                await conn.execute(
+                    "SELECT COUNT(*) AS c FROM downloads WHERE downloaded_at >= ?",
+                    (since_7d,),
+                )
+            ).fetchone()
+            referrals_total_row = await (await conn.execute("SELECT COUNT(*) AS c FROM referrals")).fetchone()
+            favorites_total_row = await (await conn.execute("SELECT COUNT(*) AS c FROM favorites")).fetchone()
+
+            return {
+                "users_total": int(users_total_row["c"]) if users_total_row else 0,
+                "users_new_24h": int(users_new_24h_row["c"]) if users_new_24h_row else 0,
+                "users_active_24h": int(users_active_24h_row["c"]) if users_active_24h_row else 0,
+                "messages_total": int(messages_total_row["value"]) if messages_total_row else 0,
+                "downloads_total": int(downloads_total_row["c"]) if downloads_total_row else 0,
+                "downloads_24h": int(downloads_24h_row["c"]) if downloads_24h_row else 0,
+                "downloads_7d": int(downloads_7d_row["c"]) if downloads_7d_row else 0,
+                "referrals_total": int(referrals_total_row["c"]) if referrals_total_row else 0,
+                "favorites_total": int(favorites_total_row["c"]) if favorites_total_row else 0,
+            }
 
     async def ensure_user(self, user_id: int, username: str | None, full_name: str) -> None:
         async with self.connect() as conn:
